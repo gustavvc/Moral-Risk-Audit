@@ -1,4 +1,4 @@
-"""Shared application and phenomenon-mode configuration."""
+"""Gemeinsame Konfiguration für Anwendung und Phänomenmodus."""
 
 from typing import Final
 
@@ -14,6 +14,14 @@ PHENOMENON_PRESETS: Final[tuple[str, ...]] = (
 
 MODE_DILEMMA: Final = "Ethisches Dilemma auditieren"
 MODE_PHENOMENA: Final = "Philosophische Phänomene erkunden"
+PHENOMENON_CHAT_HISTORY_KEY: Final = "phenomena_chat_history"
+
+MASTHEAD_SUBTITLE: Final = "PHILOSOPHISCHE BIBLIOTHEK"
+MASTHEAD_LOGO_SIZE_PX: Final = 150
+MASTHEAD_RULE_COLOR: Final = "rgba(190, 160, 100, 0.2)"
+MASTHEAD_GLOW_COLOR: Final = "rgba(180, 140, 60, 0.15)"
+MASTHEAD_TITLE_COLOR: Final = "#2A2825"
+MASTHEAD_SUBTITLE_COLOR: Final = "#7A7265"
 
 PHENOMENON_BADGE_CLASSES: Final[dict[str, str]] = {
     "primary": "phenomenon-badge phenomenon-badge-primary",
@@ -37,13 +45,13 @@ PHILOSOPHER_ALIASES: Final[dict[str, str]] = {
 
 
 def chat_target_label(target: str, primary_name: str, opponent_name: str) -> str:
-    """Return the chat target label using the currently routed philosopher names."""
+    """Gibt das Gesprächsziel mit den aktuell zugeordneten Denkernamen zurück."""
     if target == CHAT_TARGET_PRIMARY:
-        return f"👤 {primary_name}"
+        return f"🏛️ {primary_name}"
     if target == CHAT_TARGET_OPPONENT:
-        return f"👤 {opponent_name}"
+        return f"⚡ {opponent_name}"
     if target == CHAT_TARGET_ALL:
-        return "⚡ Alle 3 (Dialektik & Synthese)"
+        return "📜 Alle drei & Synthese"
     raise ValueError(f"Unbekanntes Chat-Antwortziel: {target}")
 
 

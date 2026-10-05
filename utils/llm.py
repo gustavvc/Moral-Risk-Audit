@@ -1,4 +1,4 @@
-"""OpenAI-backed analysis routines used by the Streamlit application."""
+"""OpenAI-gestützte Analysen für die Streamlit-Anwendung."""
 
 import json
 from collections.abc import Mapping, Sequence
@@ -26,6 +26,7 @@ from prompts import (
     build_phenomenon_followup_prompt,
     build_phenomenon_moderator_prompt,
     build_phenomenon_routing_prompt,
+    build_phenomenon_synthesis_prompt,
 )
 
 
@@ -46,7 +47,7 @@ def request_json(
     prompt: str,
     system_prompt: str,
 ) -> dict[str, object]:
-    """Send a JSON-mode chat completion at the app's standard temperature."""
+    """Fordert eine Chat-Antwort im JSON-Format mit Standardtemperatur an."""
     response = client.chat.completions.create(
         model=MODEL,
         temperature=MODEL_TEMPERATURE,
@@ -71,6 +72,7 @@ def _request_text(
     client: OpenAI,
     messages: Sequence[ChatMessage],
 ) -> str:
+    """Fordert eine Textantwort an und prüft, ob sie nicht leer ist."""
     response = client.chat.completions.create(
         model=MODEL,
         temperature=MODEL_TEMPERATURE,
@@ -88,7 +90,7 @@ def analyze_phenomenon(
     concept: str,
     client: OpenAI | None = None,
 ) -> dict[str, str]:
-    """Route a concept and return the primary explanation and opposing critique."""
+    """Ordnet einen Begriff zu und gibt Erklärung, Kritik und Einordnung zurück."""
     cleaned_concept = concept.strip()
     if not cleaned_concept:
         raise ValueError("Bitte gib einen Begriff oder ein Phänomen ein.")
@@ -129,15 +131,32 @@ def analyze_phenomenon(
     )
     primary_explanation = _request_text(active_client, primary_messages)
     opponent_explanation = _request_text(active_client, opponent_messages)
+    synthesis_error = ""
+    try:
+        synthesis_messages = build_phenomenon_synthesis_prompt(
+            primary_name=primary_name,
+            opponent_name=opponent_name,
+            concept=cleaned_concept,
+            primary_explanation=primary_explanation,
+            opponent_explanation=opponent_explanation,
+        )
+        dialectical_synthesis = _request_text(active_client, synthesis_messages)
+    except (OpenAIError, ValueError) as exc:
+        dialectical_synthesis = ""
+        synthesis_error = str(exc)
     st.session_state["current_hauptdenker"] = primary_name
     st.session_state["current_kontrahent"] = opponent_name
-    return {
+    result = {
         "concept": cleaned_concept,
         "primary_philosopher": primary_name,
         "opponent_philosopher": opponent_name,
         "primary_explanation": primary_explanation,
         "opponent_explanation": opponent_explanation,
+        "dialectical_synthesis": dialectical_synthesis,
     }
+    if synthesis_error:
+        result["synthesis_error"] = synthesis_error
+    return result
 
 
 def answer_phenomenon_followup(
@@ -151,7 +170,7 @@ def answer_phenomenon_followup(
     history: Sequence[PhenomenonChatTurn] = (),
     client: OpenAI | None = None,
 ) -> dict[str, str]:
-    """Return the selected thinker replies and, for all, a dialectical synthesis."""
+    """Gibt gezielte Denkerantworten und gegebenenfalls eine Synthese zurück."""
     cleaned_question = question.strip()
     if not cleaned_question:
         raise ValueError("Bitte gib eine Rückfrage ein.")
@@ -237,7 +256,7 @@ def answer_dilemma_followup(
     history: Sequence[DilemmaChatTurn] = (),
     client: OpenAI | None = None,
 ) -> dict[str, str]:
-    """Route a dilemma chat turn to one selected thinker or all plus synthesis."""
+    """Leitet eine Rückfrage an einen Denker oder alle samt Synthese weiter."""
     cleaned_question = question.strip()
     if not dilemma.strip() or not cleaned_question:
         raise ValueError("Dilemma und Einwand dürfen nicht leer sein.")
@@ -277,7 +296,7 @@ def _canonical_philosopher_name(
     value: str,
     valid_names: set[str],
 ) -> str | None:
-    """Resolve case and incidental surrounding whitespace in routed names."""
+    """Bereinigt Groß-/Kleinschreibung und Leerzeichen in zugeordneten Namen."""
     cleaned = value.strip()
     canonical = next(
         (name for name in valid_names if name.casefold() == cleaned.casefold()),

@@ -11,9 +11,16 @@ from config import (
     CHAT_TARGET_LABELS,
     CHAT_TARGET_OPPONENT,
     CHAT_TARGET_PRIMARY,
+    MASTHEAD_GLOW_COLOR,
+    MASTHEAD_LOGO_SIZE_PX,
+    MASTHEAD_RULE_COLOR,
+    MASTHEAD_SUBTITLE,
+    MASTHEAD_SUBTITLE_COLOR,
+    MASTHEAD_TITLE_COLOR,
     MODE_DILEMMA,
     MODE_PHENOMENA,
     PHENOMENON_BADGE_CLASSES,
+    PHENOMENON_CHAT_HISTORY_KEY,
     PHENOMENON_PRESETS,
     PHILOSOPHER_FRAMEWORKS,
     chat_target_label,
@@ -26,7 +33,7 @@ from utils.llm import (
     answer_phenomenon_followup,
     request_json,
 )
-from utils.assets import portrait_data_uri
+from utils.assets import portrait_data_uri, sun_logo_data_uri
 
 
 APP_NAME = "Dialectica AI"
@@ -43,6 +50,14 @@ DILEMMA_ANALYSIS_STATE_KEYS = (
     "consensus_selection",
     "consensus_dilemma",
     "_pending_dilemma",
+)
+PHENOMENON_ANALYSIS_STATE_KEYS = (
+    "phenomenon_result",
+    PHENOMENON_CHAT_HISTORY_KEY,
+    "phenomenon_chat",
+    "phenomenon_chat_target",
+    "current_hauptdenker",
+    "current_kontrahent",
 )
 ASSISTANT_CLICHES = (
     "als ki",
@@ -61,6 +76,12 @@ def reset_dilemma_state(*, clear_input: bool = False) -> None:
         st.session_state.pop(key, None)
     if clear_input:
         st.session_state["dilemma_input"] = ""
+
+
+def reset_phenomenon_state() -> None:
+    """Setzt Ergebnis und Gesprächsverlauf des Phänomenmodus zurück."""
+    for key in PHENOMENON_ANALYSIS_STATE_KEYS:
+        st.session_state.pop(key, None)
 
 
 PHILOSOPHERS = {
@@ -196,7 +217,7 @@ def escape_text(value: str) -> str:
 
 
 def get_philosopher_details(name: str) -> dict[str, str]:
-    """Return UI metadata for selectable and routing-only philosophers."""
+    """Gibt Anzeigedaten für auswählbare und automatisch zugeordnete Denker zurück."""
     details = PHILOSOPHERS.get(name)
     if details is not None:
         return details
@@ -259,7 +280,7 @@ def render_perspective_card(
         with st.container(key=f"perspective-{slug}"):
             render_philosopher_identity(name)
             for title, field in (
-                ("Position", "position"),
+                ("Standpunkt", "position"),
                 ("Begründung", "reasoning"),
                 ("Fazit", "conclusion"),
             ):
@@ -322,9 +343,13 @@ def render_phenomenon_chat_turn(
             response = responses.get(responder)
             if isinstance(response, str) and response.strip():
                 responder_label = (
-                    "Dialektische Synthese"
+                    "📜 Synthese"
                     if responder == CHAT_MODERATOR_NAME
-                    else f"Antwort von {responder}"
+                    else (
+                        f"🏛️ {responder}"
+                        if responder == primary_name
+                        else f"⚡ {responder}"
+                    )
                 )
                 st.markdown(
                     f'<span class="chat-response-label {badge_classes[responder]}">'
@@ -338,9 +363,9 @@ def render_dilemma_chat_turn(turn: DilemmaChatTurn) -> None:
     """Render a dilemma objection and clearly badge every thinker reply."""
     target = turn["target"]
     addressed_label = (
-        "⚡ Alle 3 (Diskurs & Synthese)"
+        "📜 Beide & Synthese"
         if target == CHAT_TARGET_ALL
-        else f"👤 {target}"
+        else f"🏛️ {target}"
     )
     with st.chat_message("user"):
         st.markdown(
@@ -363,13 +388,16 @@ def render_dilemma_chat_turn(turn: DilemmaChatTurn) -> None:
     badge_classes[CHAT_MODERATOR_NAME] = PHENOMENON_BADGE_CLASSES["moderator"]
     with st.chat_message("assistant"):
         for name, response in turn["responses"].items():
+            badge_class = badge_classes.get(
+                name, PHENOMENON_BADGE_CLASSES["primary"]
+            )
             responder_label = (
-                "Dialektische Synthese"
+                "📜 Synthese"
                 if name == CHAT_MODERATOR_NAME
-                else f"Antwort von {name}"
+                else f"{'🏛️' if badge_class == PHENOMENON_BADGE_CLASSES['primary'] else '⚡'} {name}"
             )
             st.markdown(
-                f'<span class="chat-response-label {badge_classes.get(name, PHENOMENON_BADGE_CLASSES["primary"])}">'
+                f'<span class="chat-response-label {badge_class}">'
                 f'{html.escape(responder_label)}</span>',
                 unsafe_allow_html=True,
             )
@@ -381,18 +409,18 @@ def render_consensus(consensus: dict[str, object]) -> None:
     st.markdown(
         '<section class="consensus-board">'
         '<p class="eyebrow">Synthese der Positionen</p>'
-        '<h2>Gemeinsames Urteil &amp; Konsens</h2>'
+        '<h2>Synthese &amp; Konsens</h2>'
         "</section>",
         unsafe_allow_html=True,
     )
     metric_column, conflict_column = st.columns([1, 2])
     with metric_column:
-        st.metric("Einigkeits-Score", f"{score}%")
+        st.metric("Grad der Übereinstimmung", f"{score}%")
         st.progress(score, text=f"Übereinstimmung: {score}%")
     with conflict_column:
         st.markdown("**Zentraler philosophischer Streitpunkt**")
         st.write(consensus["conflict_summary"])
-    st.subheader("Konsens- vs. Konflikt-Matrix")
+    st.subheader("Matrix der Gemeinsamkeiten und Konflikte")
     matrix_rows = [
         {
             "Philosoph:innen": " ↔ ".join(comparison["philosophers"]),
@@ -408,6 +436,22 @@ st.set_page_config(
     page_title=APP_NAME,
     page_icon="D",
     layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown(
+    f"""
+    <style>
+    :root {{
+        --masthead-logo-size: {MASTHEAD_LOGO_SIZE_PX}px;
+        --masthead-rule: {MASTHEAD_RULE_COLOR};
+        --masthead-glow: {MASTHEAD_GLOW_COLOR};
+        --masthead-title-color: {MASTHEAD_TITLE_COLOR};
+        --masthead-subtitle-color: {MASTHEAD_SUBTITLE_COLOR};
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 st.markdown(
@@ -439,14 +483,18 @@ st.markdown(
     [data-testid="stMarkdownContainer"] h2,
     [data-testid="stMarkdownContainer"] h3 {
         color: var(--ink) !important;
-        font-family: Georgia, "Times New Roman", serif !important;
+        font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif !important;
         letter-spacing: -0.025em;
         line-height: 1.2 !important;
     }
 
     .block-container {
+        box-sizing: border-box;
+        margin-left: auto;
+        margin-right: auto;
         max-width: 1500px;
         padding: 2.5rem 2rem 8rem;
+        width: 100%;
     }
 
     [data-testid="stSidebar"] {
@@ -454,9 +502,114 @@ st.markdown(
         border-right: 1px solid var(--line);
     }
 
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="stHeader"] button[aria-label*="sidebar" i],
+    [data-testid="stHeader"] button[title*="sidebar" i] {
+        background: #f4f1ea !important;
+        border: 1px solid #8f7a54 !important;
+        border-radius: 7px !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16) !important;
+        color: #000000 !important;
+        min-height: 2.35rem;
+        min-width: 2.35rem;
+        opacity: 1 !important;
+        visibility: visible !important;
+        transition: background-color 140ms ease, box-shadow 140ms ease;
+    }
+
+    [data-testid="stSidebarCollapseButton"] button,
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapsedControl"] button {
+        background: #f4f1ea !important;
+        border: 1px solid #8f7a54 !important;
+        border-radius: 7px !important;
+        color: #000000 !important;
+        min-height: 2.35rem;
+        min-width: 2.35rem;
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+
+    [data-testid="stSidebarCollapseButton"] svg,
+    [data-testid="stExpandSidebarButton"] svg,
+    [data-testid="stSidebarCollapsedControl"] svg,
+    [data-testid="stHeader"] button[aria-label*="sidebar" i] svg,
+    [data-testid="stHeader"] button[title*="sidebar" i] svg {
+        color: #000000 !important;
+        fill: #000000 !important;
+        opacity: 1 !important;
+        stroke: #000000 !important;
+        visibility: visible !important;
+    }
+
+    [data-testid="stSidebarCollapseButton"] svg *,
+    [data-testid="stExpandSidebarButton"] svg *,
+    [data-testid="stSidebarCollapsedControl"] svg *,
+    [data-testid="stHeader"] button[aria-label*="sidebar" i] svg *,
+    [data-testid="stHeader"] button[title*="sidebar" i] svg * {
+        fill: #000000 !important;
+        stroke: #000000 !important;
+    }
+
+    [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"],
+    [data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"],
+    [data-testid="stSidebarCollapsedControl"] [data-testid="stIconMaterial"] {
+        color: transparent !important;
+        font-size: 0 !important;
+        overflow: visible !important;
+        position: relative;
+    }
+
+    [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"]::before,
+    [data-testid="stSidebarCollapsedControl"] [data-testid="stIconMaterial"]::before {
+        color: #000000 !important;
+        content: "‹";
+        display: inline-block;
+        font-family: Arial, sans-serif;
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1;
+        pointer-events: none;
+    }
+
+    [data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"]::before {
+        color: #000000 !important;
+        content: "›";
+        display: inline-block;
+        font-family: Arial, sans-serif;
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1;
+        pointer-events: none;
+    }
+
+    [data-testid="stSidebarCollapseButton"]:hover,
+    [data-testid="stSidebarCollapseButton"] button:hover,
+    [data-testid="stExpandSidebarButton"]:hover,
+    [data-testid="stSidebarCollapsedControl"]:hover,
+    [data-testid="stSidebarCollapsedControl"] button:hover,
+    [data-testid="stHeader"] button[aria-label*="sidebar" i]:hover,
+    [data-testid="stHeader"] button[title*="sidebar" i]:hover {
+        background: #e6dcc7 !important;
+        box-shadow: 0 2px 7px rgba(0, 0, 0, 0.22) !important;
+    }
+
+    [data-testid="stSidebarCollapseButton"]:focus-visible,
+    [data-testid="stSidebarCollapseButton"] button:focus-visible,
+    [data-testid="stExpandSidebarButton"]:focus-visible,
+    [data-testid="stSidebarCollapsedControl"]:focus-visible,
+    [data-testid="stSidebarCollapsedControl"] button:focus-visible,
+    [data-testid="stHeader"] button[aria-label*="sidebar" i]:focus-visible,
+    [data-testid="stHeader"] button[title*="sidebar" i]:focus-visible {
+        outline: 3px solid #000000 !important;
+        outline-offset: 3px !important;
+    }
+
     .st-key-app_mode [data-testid="stWidgetLabel"] p {
         color: var(--ink) !important;
-        font-family: Georgia, "Times New Roman", serif !important;
+        font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif !important;
         font-size: 1.15rem !important;
         font-weight: 700 !important;
     }
@@ -486,34 +639,47 @@ st.markdown(
     }
 
     .masthead {
-        border-bottom: 1px solid var(--line);
+        border-bottom: 1px solid var(--masthead-rule);
         margin: 0 auto 2.3rem;
         max-width: 1000px;
-        padding: 0 0 1.65rem;
+        padding: 0.25rem 0 1.65rem;
         text-align: center;
     }
 
+    .sun-emblem {
+        display: block;
+        filter: drop-shadow(0 10px 30px var(--masthead-glow));
+        height: auto;
+        margin: 0 auto 1.5rem;
+        max-width: min(var(--masthead-logo-size), 40vw);
+        object-fit: contain;
+        width: var(--masthead-logo-size);
+    }
+
     .masthead-mark {
-        color: var(--accent);
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 0.9rem;
-        font-weight: 700;
-        letter-spacing: 0.24em;
-        text-transform: uppercase;
+        display: none;
     }
 
     .masthead h1 {
-        font-size: clamp(2.8rem, 6vw, 4.7rem);
-        font-weight: 500;
-        line-height: 1.05 !important;
-        margin: 0.55rem 0 0.35rem;
+        color: var(--masthead-title-color) !important;
+        font-family: "Cormorant Garamond", "Palatino Linotype",
+            "Book Antiqua", Georgia, serif !important;
+        font-size: 2.2rem !important;
+        font-weight: 400;
+        letter-spacing: 0.18em;
+        line-height: 1.2 !important;
+        margin: 0 0 0.7rem;
+        text-transform: uppercase;
     }
 
     .masthead p {
-        color: var(--muted);
-        font-size: 0.98rem;
-        letter-spacing: 0.055em;
+        color: var(--masthead-subtitle-color);
+        font-family: Inter, "Helvetica Neue", Helvetica, system-ui, sans-serif;
+        font-size: 0.85rem;
+        font-weight: 300;
+        letter-spacing: 0.25em;
         margin: 0;
+        text-transform: uppercase;
     }
 
     .section-kicker, .eyebrow {
@@ -637,7 +803,7 @@ st.markdown(
         border-radius: 50%;
         color: #292722;
         display: flex;
-        font-family: Georgia, "Times New Roman", serif;
+        font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
         font-size: 2.5rem;
         font-weight: 700;
         height: 170px;
@@ -732,6 +898,29 @@ st.markdown(
         padding-top: 1.5rem;
     }
 
+    .st-key-phenomenon-chat-panel {
+        border-top: 1px solid var(--line);
+        margin-top: 2.2rem;
+        padding-bottom: 7rem;
+        padding-top: 1.5rem;
+    }
+
+    .st-key-phenomenon-chat-panel [data-testid="stChatMessage"] {
+        background: #fffdf8;
+        border: 1px solid #d7d0c4;
+        border-radius: 12px;
+        box-shadow: 0 4px 14px rgba(42, 35, 25, 0.045);
+        margin: 0.65rem 0;
+        padding: 0.75rem 1rem;
+    }
+
+    .st-key-phenomenon-chat-panel .phenomenon-badge,
+    .st-key-dilemma-chat-panel .phenomenon-badge {
+        font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+        letter-spacing: 0.025em;
+        text-transform: none;
+    }
+
     .consensus-board h2 {
         font-size: 2rem;
         margin: 0.2rem 0 0.8rem;
@@ -758,7 +947,7 @@ st.markdown(
     }
 
     .phenomenon-badge-primary {
-        background: #292722;
+        background: #302c26;
         color: #ffffff;
     }
 
@@ -938,6 +1127,15 @@ st.markdown(
     @media (max-width: 768px) {
         .block-container { padding: 1.5rem 1rem 8rem; }
         .st-key-input-panel { padding: 1.1rem 1rem 0.8rem; }
+        .masthead { padding-bottom: 1.2rem; }
+        .masthead h1 {
+            font-size: 1.55rem !important;
+            letter-spacing: 0.12em;
+        }
+        .masthead p {
+            font-size: 0.7rem;
+            letter-spacing: 0.16em;
+        }
         .stHorizontalBlock:not(:has([class*="st-key-choice-"])) {
             align-items: stretch !important;
             flex-direction: column !important;
@@ -1010,9 +1208,11 @@ st.markdown(
 st.markdown(
     f"""
     <header class="masthead">
-      <div class="masthead-mark">Dialectica</div>
+      <img class="sun-emblem" src="{sun_logo_data_uri()}"
+           alt="Goldene Sonne als Sinnbild für Wissen und Erleuchtung"
+           decoding="async" fetchpriority="high">
       <h1>{APP_NAME}</h1>
-      <p>A Comparative Philosophical Analysis &amp; Ethics Engine</p>
+      <p>{MASTHEAD_SUBTITLE}</p>
     </header>
     """,
     unsafe_allow_html=True,
@@ -1034,7 +1234,10 @@ with st.sidebar:
         st.rerun()
 
 if app_mode == MODE_PHENOMENA:
-    st.markdown('<div class="section-kicker">A concept in dialogue</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-kicker">Ein Begriff im Dialog</div>',
+        unsafe_allow_html=True,
+    )
     st.header("Philosophische Phänomene & Konzepte erkunden")
     st.write(
         "Lass den Hauptvertreter eine Idee entfalten und fordere anschließend "
@@ -1070,7 +1273,9 @@ if app_mode == MODE_PHENOMENA:
             st.warning("Bitte gib einen Begriff oder ein Phänomen ein.")
         else:
             st.session_state["phenomenon_result"] = None
-            st.session_state["phenomenon_chat"] = []
+            st.session_state[PHENOMENON_CHAT_HISTORY_KEY] = []
+            st.session_state["phenomenon_chat_target"] = CHAT_TARGET_ALL
+            st.session_state.pop("phenomenon_chat", None)
             try:
                 with st.spinner("Hauptdenker und Kontrahent analysieren das Phänomen ..."):
                     phenomenon_result = analyze_phenomenon(concept)
@@ -1078,7 +1283,7 @@ if app_mode == MODE_PHENOMENA:
                 st.error(f"Die Phänomenanalyse ist fehlgeschlagen: {exc}")
             else:
                 st.session_state["phenomenon_result"] = phenomenon_result
-                st.session_state["phenomenon_chat"] = []
+                st.session_state[PHENOMENON_CHAT_HISTORY_KEY] = []
 
     phenomenon_result = st.session_state.get("phenomenon_result")
     if (
@@ -1115,101 +1320,184 @@ if app_mode == MODE_PHENOMENA:
             phenomenon_result["opponent_explanation"],
         )
 
-        st.subheader("Im Gespräch weiterdenken")
-        raw_chat_history = st.session_state.get("phenomenon_chat")
-        chat_history = (
-            raw_chat_history if isinstance(raw_chat_history, list) else []
+        synthesis = phenomenon_result.get("dialectical_synthesis")
+        st.markdown(
+            '<section class="consensus-board">'
+            '<p class="eyebrow">Dialektische Einordnung</p>'
+            '<h2>Synthese der Perspektiven</h2>'
+            "</section>",
+            unsafe_allow_html=True,
         )
-        if chat_history is not raw_chat_history:
-            st.session_state["phenomenon_chat"] = chat_history
-        valid_chat_history = [
-            turn
-            for turn in chat_history
-            if isinstance(turn, dict)
-            and isinstance(turn.get("question"), str)
-            and isinstance(turn.get("responses"), dict)
-            and any(
-                isinstance(turn["responses"].get(responder), str)
-                for responder in (
-                    primary_name,
-                    opponent_name,
-                    CHAT_MODERATOR_NAME,
-                )
+        if isinstance(synthesis, str) and synthesis.strip():
+            st.markdown(
+                '<div class="argument-block phenomenon-synthesis">'
+                '<span class="phenomenon-badge phenomenon-badge-moderator">'
+                "📜 Synthese</span>"
+                f"<p>{escape_text(synthesis)}</p></div>",
+                unsafe_allow_html=True,
             )
-        ]
-        for turn in valid_chat_history:
-            render_phenomenon_chat_turn(turn, primary_name, opponent_name)
-
-        current_target = st.session_state.get("phenomenon_chat_target")
-        if (
-            not isinstance(current_target, str)
-            or current_target not in CHAT_TARGET_LABELS
-        ):
-            st.session_state["phenomenon_chat_target"] = CHAT_TARGET_ALL
-        selected_target = st.segmented_control(
-            "Antwortziel",
-            options=(
-                CHAT_TARGET_PRIMARY,
-                CHAT_TARGET_OPPONENT,
-                CHAT_TARGET_ALL,
-            ),
-            format_func=lambda target: chat_target_label(
-                target, primary_name, opponent_name
-            ),
-            key="phenomenon_chat_target",
-            help=(
-                "Wähle einen einzelnen Denker oder lasse beide und die "
-                "dialektische Moderation antworten."
-            ),
-            width="stretch",
-        )
-        followup = st.chat_input(
-            "Formuliere eine Frage oder einen Einwand",
-            key="phenomenon-followup",
-        )
-        if followup:
-            if (
-                not isinstance(selected_target, str)
-                or selected_target not in CHAT_TARGET_LABELS
-            ):
-                selected_target = CHAT_TARGET_ALL
-            try:
-                target_label = chat_target_label(
-                    selected_target, primary_name, opponent_name
+        else:
+            synthesis_error = phenomenon_result.get("synthesis_error")
+            if isinstance(synthesis_error, str) and synthesis_error.strip():
+                st.warning(
+                    "Die Denkerkarten sind fertig; die dialektische Einordnung "
+                    f"konnte jedoch nicht erstellt werden: {synthesis_error}"
                 )
-                with st.spinner(f"{target_label} formuliert eine Antwort ..."):
-                    previous_turns: list[PhenomenonChatTurn] = [
-                        {
-                            "question": turn["question"],
-                            "primary_response": turn["responses"].get(primary_name),
-                            "opponent_response": turn["responses"].get(opponent_name),
-                            "moderator_response": turn["responses"].get(
-                                CHAT_MODERATOR_NAME
-                            ),
-                        }
-                        for turn in valid_chat_history
-                    ]
-                    responses = answer_phenomenon_followup(
-                        concept=phenomenon_result["concept"],
-                        primary_name=primary_name,
-                        opponent_name=opponent_name,
-                        primary_explanation=phenomenon_result["primary_explanation"],
-                        opponent_explanation=phenomenon_result["opponent_explanation"],
-                        question=followup,
-                        target=selected_target,
-                        history=previous_turns,
-                    )
-            except (OpenAIError, ValueError, json.JSONDecodeError) as exc:
-                st.error(f"Die Rückfrage konnte nicht beantwortet werden: {exc}")
             else:
-                chat_history.append(
-                    {
-                        "question": followup,
-                        "target": selected_target,
-                        "responses": responses,
-                    }
+                st.info(
+                    "Diese gespeicherte Analyse enthält noch keine dialektische "
+                    "Einordnung. Starte die Erkundung erneut, um sie zu ergänzen."
                 )
+
+        with st.container(key="phenomenon-chat-panel"):
+            st.subheader("Sokratischer Dialog")
+            if st.button(
+                "🔄 Neues Phänomen / Dialog zurücksetzen",
+                key="reset-phenomenon-chat",
+                use_container_width=True,
+            ):
+                reset_phenomenon_state()
                 st.rerun()
+
+            st.markdown(
+                "Wähle, wer auf deine Rückfrage antworten soll. "
+                "Bei der dialektischen Runde antworten beide Denker und die "
+                "Moderation ordnet den Streit ein."
+            )
+            current_target = st.session_state.get("phenomenon_chat_target")
+            if (
+                not isinstance(current_target, str)
+                or current_target not in CHAT_TARGET_LABELS
+            ):
+                st.session_state["phenomenon_chat_target"] = CHAT_TARGET_ALL
+            selected_target = st.segmented_control(
+                "Perspektive auswählen",
+                options=(
+                    CHAT_TARGET_PRIMARY,
+                    CHAT_TARGET_OPPONENT,
+                    CHAT_TARGET_ALL,
+                ),
+                format_func=lambda target: chat_target_label(
+                    target, primary_name, opponent_name
+                ),
+                key="phenomenon_chat_target",
+                help=(
+                    "Wähle einen Denker allein oder beide mit anschließender "
+                    "dialektischer Synthese."
+                ),
+                width="stretch",
+            )
+
+            raw_chat_history = st.session_state.get(PHENOMENON_CHAT_HISTORY_KEY)
+            if not isinstance(raw_chat_history, list):
+                raw_chat_history = st.session_state.get("phenomenon_chat", [])
+                if not isinstance(raw_chat_history, list):
+                    raw_chat_history = []
+                st.session_state[PHENOMENON_CHAT_HISTORY_KEY] = list(raw_chat_history)
+            st.session_state.pop("phenomenon_chat", None)
+            chat_history = st.session_state[PHENOMENON_CHAT_HISTORY_KEY]
+            valid_chat_history: list[dict[str, object]] = [
+                turn
+                for turn in chat_history
+                if isinstance(turn, dict)
+                and isinstance(turn.get("question"), str)
+                and isinstance(turn.get("target"), str)
+                and turn.get("target") in CHAT_TARGET_LABELS
+                and isinstance(turn.get("responses"), dict)
+                and all(
+                    isinstance(name, str)
+                    and isinstance(response, str)
+                    and bool(response.strip())
+                    for name, response in turn["responses"].items()
+                )
+                and any(
+                    isinstance(turn["responses"].get(responder), str)
+                    and bool(turn["responses"][responder].strip())
+                    for responder in (
+                        primary_name,
+                        opponent_name,
+                        CHAT_MODERATOR_NAME,
+                    )
+                )
+            ]
+            with st.container(key="phenomenon-chat-history"):
+                for turn in valid_chat_history:
+                    render_phenomenon_chat_turn(
+                        turn, primary_name, opponent_name
+                    )
+
+            followup = st.chat_input(
+                "Frage oder Einwand eingeben",
+                key="phenomenon-followup",
+            )
+            if followup:
+                if (
+                    not isinstance(selected_target, str)
+                    or selected_target not in CHAT_TARGET_LABELS
+                ):
+                    selected_target = CHAT_TARGET_ALL
+                try:
+                    target_label = chat_target_label(
+                        selected_target, primary_name, opponent_name
+                    )
+                    with st.spinner(f"{target_label} formuliert eine Antwort ..."):
+                        previous_turns: list[PhenomenonChatTurn] = [
+                            {
+                                "question": turn["question"],
+                                "primary_response": turn["responses"].get(primary_name),
+                                "opponent_response": turn["responses"].get(opponent_name),
+                                "moderator_response": turn["responses"].get(
+                                    CHAT_MODERATOR_NAME
+                                ),
+                            }
+                            for turn in valid_chat_history
+                        ]
+                        responses = answer_phenomenon_followup(
+                            concept=phenomenon_result["concept"],
+                            primary_name=primary_name,
+                            opponent_name=opponent_name,
+                            primary_explanation=phenomenon_result["primary_explanation"],
+                            opponent_explanation=phenomenon_result["opponent_explanation"],
+                            question=followup,
+                            target=selected_target,
+                            history=previous_turns,
+                        )
+                    if not responses or any(
+                        not isinstance(name, str)
+                        or not isinstance(response, str)
+                        or not response.strip()
+                        for name, response in responses.items()
+                    ):
+                        raise ValueError(
+                            "Die Rückfrage lieferte keine gültigen Denkerantworten."
+                        )
+                    expected_responders = (
+                        {primary_name, opponent_name, CHAT_MODERATOR_NAME}
+                        if selected_target == CHAT_TARGET_ALL
+                        else {
+                            primary_name
+                            if selected_target == CHAT_TARGET_PRIMARY
+                            else opponent_name
+                        }
+                    )
+                    if set(responses) != expected_responders:
+                        raise ValueError(
+                            "Die Antworten entsprechen nicht der gewählten "
+                            "Gesprächsperspektive."
+                        )
+                except (OpenAIError, ValueError, json.JSONDecodeError) as exc:
+                    st.error(f"Die Rückfrage konnte nicht beantwortet werden: {exc}")
+                else:
+                    new_turn = {
+                        "question": followup.strip(),
+                        "target": selected_target,
+                        "responses": dict(responses),
+                    }
+                    st.session_state[PHENOMENON_CHAT_HISTORY_KEY] = [
+                        *valid_chat_history,
+                        new_turn,
+                    ]
+                    st.rerun()
     st.stop()
 
 selection = tuple(
@@ -1220,7 +1508,7 @@ selection = tuple(
 
 with st.container(key="input-panel"):
     st.markdown(
-        '<p class="section-kicker">Begin with the question</p>',
+        '<p class="section-kicker">Die Frage im Mittelpunkt</p>',
         unsafe_allow_html=True,
     )
     st.header("Ethisches Dilemma eingeben")
@@ -1278,7 +1566,7 @@ Philosophische Schule: {details['school']}.
 Kernansicht: {details['core_view']}.
 Stil: {details['voice']}.
 
-Formuliere prägnant, eigenständig, scharf argumentiert und in-character.
+Formuliere prägnant, eigenständig, scharf argumentiert und der Rolle treu.
 Analysiere AUSSCHLIESSLICH durch die folgende philosophische Brille:
 {details['analysis_lens']}
 Vermeide allgemeine Moralformeln sowie Begriffe oder Argumentationsmuster
@@ -1428,7 +1716,10 @@ Die comparison_matrix muss exakt diese drei Paare in dieser Reihenfolge enthalte
         else:
             progress.update(label="Die Analyse wurde wegen einer fehlerhaften Antwort beendet.", state="error")
 
-st.markdown('<div class="section-kicker">Three selected perspectives</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="section-kicker">Drei gewählte Perspektiven</div>',
+    unsafe_allow_html=True,
+)
 st.header("Die philosophischen Perspektiven")
 
 saved_debate = st.session_state.get("debate")
@@ -1486,12 +1777,16 @@ if len(selection) == 3:
             if current_dilemma_target not in (*selection, CHAT_TARGET_ALL):
                 st.session_state["dilemma_chat_target"] = CHAT_TARGET_ALL
             dilemma_chat_target = st.segmented_control(
-                "Antwortziel",
+                "Perspektive auswählen",
                 options=(*selection, CHAT_TARGET_ALL),
                 format_func=lambda target: (
-                    "⚡ Alle 3 (Diskurs & Synthese)"
+                    "📜 Alle drei & Synthese"
                     if target == CHAT_TARGET_ALL
-                    else f"👤 {target}"
+                    else (
+                        "🏛️" if target == selection[0]
+                        else "⚡" if target == selection[1]
+                        else "📚"
+                    ) + f" {target}"
                 ),
                 key="dilemma_chat_target",
                 help="Wähle einen der drei aktiven Denker oder lasse alle antworten.",
@@ -1528,18 +1823,23 @@ if len(selection) == 3:
                         "Eine Dialogantwort enthielt eine Chatbot-Floskel."
                     )
             except (OpenAIError, ValueError, json.JSONDecodeError) as exc:
-                    st.error(f"Der sokratische Dialog ist fehlgeschlagen: {exc}")
+                st.error(f"Der sokratische Dialog ist fehlgeschlagen: {exc}")
             else:
-                    dialogue_history.append({
+                dialogue_history.append(
+                    {
                         "question": user_argument.strip(),
                         "target": dilemma_chat_target,
                         "responses": responses,
-                    })
-                    st.session_state["dilemma_chat_history"] = dialogue_history
-                    st.rerun()
+                    }
+                )
+                st.session_state["dilemma_chat_history"] = dialogue_history
+                st.rerun()
 
 st.markdown('<div class="grid-heading">', unsafe_allow_html=True)
-st.markdown('<p class="section-kicker">The philosophical library</p>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="section-kicker">Die philosophische Bibliothek</p>',
+    unsafe_allow_html=True,
+)
 st.header("Wähle genau drei Philosophen")
 st.markdown(
     "Hier siehst du historische Gemälde, Fotografien und antike Büsten. "
