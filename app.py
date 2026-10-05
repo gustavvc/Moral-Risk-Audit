@@ -16,6 +16,7 @@ from config import (
     PHENOMENON_BADGE_CLASSES,
     PHENOMENON_PRESETS,
     PHILOSOPHER_FRAMEWORKS,
+    chat_target_label,
 )
 from prompts import PhenomenonChatTurn, build_system_prompt
 from utils.llm import (
@@ -277,10 +278,11 @@ def render_phenomenon_chat_turn(
     target = turn.get("target")
     if not isinstance(target, str) or target not in CHAT_TARGET_LABELS:
         target = CHAT_TARGET_ALL
+    target_label = chat_target_label(target, primary_name, opponent_name)
     with st.chat_message("user"):
         st.markdown(
             '<span class="chat-target-label">'
-            f"Frage an: {html.escape(CHAT_TARGET_LABELS[target])}</span>",
+            f"Frage an: {html.escape(target_label)}</span>",
             unsafe_allow_html=True,
         )
         st.write(turn["question"])
@@ -297,9 +299,14 @@ def render_phenomenon_chat_turn(
         for responder in (primary_name, opponent_name, CHAT_MODERATOR_NAME):
             response = responses.get(responder)
             if isinstance(response, str) and response.strip():
+                responder_label = (
+                    "Dialektische Synthese"
+                    if responder == CHAT_MODERATOR_NAME
+                    else f"Antwort von {responder}"
+                )
                 st.markdown(
                     f'<span class="chat-response-label {badge_classes[responder]}">'
-                    f'{html.escape(responder)}</span>',
+                    f'{html.escape(responder_label)}</span>',
                     unsafe_allow_html=True,
                 )
                 st.write(response)
@@ -1010,6 +1017,8 @@ if app_mode == MODE_PHENOMENA:
     ):
         primary_name = phenomenon_result["primary_philosopher"]
         opponent_name = phenomenon_result["opponent_philosopher"]
+        st.session_state["current_hauptdenker"] = primary_name
+        st.session_state["current_kontrahent"] = opponent_name
         primary_badge = PHENOMENON_BADGE_CLASSES["primary"]
         opponent_badge = PHENOMENON_BADGE_CLASSES["opponent"]
         primary_column, opponent_column = st.columns(2)
@@ -1066,7 +1075,9 @@ if app_mode == MODE_PHENOMENA:
                 CHAT_TARGET_OPPONENT,
                 CHAT_TARGET_ALL,
             ),
-            format_func=lambda target: CHAT_TARGET_LABELS[target],
+            format_func=lambda target: chat_target_label(
+                target, primary_name, opponent_name
+            ),
             key="phenomenon_chat_target",
             help=(
                 "Wähle einen einzelnen Denker oder lasse beide und die "
@@ -1085,8 +1096,8 @@ if app_mode == MODE_PHENOMENA:
             ):
                 selected_target = CHAT_TARGET_ALL
             try:
-                target_label = CHAT_TARGET_LABELS.get(
-                    selected_target, CHAT_TARGET_LABELS[CHAT_TARGET_ALL]
+                target_label = chat_target_label(
+                    selected_target, primary_name, opponent_name
                 )
                 with st.spinner(f"{target_label} formuliert eine Antwort ..."):
                     previous_turns: list[PhenomenonChatTurn] = [

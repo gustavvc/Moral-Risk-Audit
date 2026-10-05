@@ -31,6 +31,22 @@ CHAT_TARGET_LABELS: Final[dict[str, str]] = {
     CHAT_TARGET_ALL: "Alle 3 · Dialektischer Diskurs",
 }
 
+PHILOSOPHER_ALIASES: Final[dict[str, str]] = {
+    "Goethe": "Johann Wolfgang von Goethe",
+}
+
+
+def chat_target_label(target: str, primary_name: str, opponent_name: str) -> str:
+    """Return the chat target label using the currently routed philosopher names."""
+    if target == CHAT_TARGET_PRIMARY:
+        return f"👤 {primary_name}"
+    if target == CHAT_TARGET_OPPONENT:
+        return f"👤 {opponent_name}"
+    if target == CHAT_TARGET_ALL:
+        return "⚡ Alle 3 (Dialektik & Synthese)"
+    raise ValueError(f"Unbekanntes Chat-Antwortziel: {target}")
+
+
 # The profile is shared by prompt construction and LLM routing validation.
 PHILOSOPHER_FRAMEWORKS: Final[dict[str, dict[str, str]]] = {
     "Immanuel Kant": {
@@ -116,5 +132,11 @@ PHILOSOPHER_FRAMEWORKS: Final[dict[str, dict[str, str]]] = {
         "core": "Beurteile Macht, virtù, fortuna, Staatsräson und politische Stabilität unter wirklichen Bedingungen.",
         "voice": "nüchtern-berechnend und realpolitisch",
         "works": "Der Fürst; Discorsi",
+    },
+    "Johann Wolfgang von Goethe": {
+        "school": "Weimarer Klassik und Faustische Selbstüberschreitung",
+        "core": "Im Faustischen Streben verbinden sich Erkenntnisdrang, tätige Weltaneignung und die Gefahr maßloser Selbstüberschreitung; Entwicklung muss sich an Verantwortung und Wirkung in der Welt bewähren.",
+        "voice": "anschaulich, weltzugewandt und dialektisch",
+        "works": "Faust I; Faust II; Wilhelm Meisters Lehrjahre",
     },
 }

@@ -13,6 +13,7 @@ from config import (
     CHAT_TARGET_PRIMARY,
     MODEL,
     MODEL_TEMPERATURE,
+    PHILOSOPHER_ALIASES,
     PHILOSOPHER_FRAMEWORKS,
 )
 from prompts import (
@@ -125,6 +126,8 @@ def analyze_phenomenon(
     )
     primary_explanation = _request_text(active_client, primary_messages)
     opponent_explanation = _request_text(active_client, opponent_messages)
+    st.session_state["current_hauptdenker"] = primary_name
+    st.session_state["current_kontrahent"] = opponent_name
     return {
         "concept": cleaned_concept,
         "primary_philosopher": primary_name,
@@ -228,10 +231,16 @@ def _canonical_philosopher_name(
 ) -> str | None:
     """Resolve case and incidental surrounding whitespace in routed names."""
     cleaned = value.strip()
-    return next(
+    canonical = next(
         (name for name in valid_names if name.casefold() == cleaned.casefold()),
         None,
     )
+    if canonical is not None:
+        return canonical
+    alias_target = PHILOSOPHER_ALIASES.get(cleaned)
+    if alias_target is not None and alias_target in valid_names:
+        return alias_target
+    return None
 
 
 __all__ = [
