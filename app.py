@@ -5,12 +5,24 @@ from itertools import combinations
 from pathlib import Path
 
 import streamlit as st
-from openai import OpenAI, OpenAIError
+from openai import OpenAI
+
+from config import (
+    MODE_DILEMMA,
+    MODE_PHENOMENA,
+    PHENOMENON_BADGE_CLASSES,
+    PHENOMENON_PRESETS,
+)
+from prompts import build_system_prompt
+from utils.llm import (
+    OpenAIError,
+    analyze_phenomenon,
+    answer_phenomenon_followup,
+    request_json,
+)
 
 
 APP_NAME = "Dialectica AI"
-MODEL = "gpt-4o-mini"
-MODEL_TEMPERATURE = 0.35
 PERSPECTIVE_FIELDS = ("position", "reasoning", "conclusion")
 CONSENSUS_FIELDS = ("agreement_score", "conflict_summary", "comparison_matrix")
 ASSISTANT_CLICHES = (
@@ -146,62 +158,6 @@ PHILOSOPHERS = {
     },
 }
 
-PRIMARY_WORKS = {
-    "Immanuel Kant": "Grundlegung zur Metaphysik der Sitten; Kritik der praktischen Vernunft",
-    "Friedrich Nietzsche": "Zur Genealogie der Moral; Jenseits von Gut und Böse",
-    "Marc Aurel": "Selbstbetrachtungen",
-    "Hannah Arendt": "Vita activa; Elemente und Ursprünge totaler Herrschaft",
-    "John Stuart Mill": "Utilitarismus; Über die Freiheit",
-    "Simone de Beauvoir": "Für eine Moral der Doppelsinnigkeit; Das andere Geschlecht",
-    "Karl Marx": "Das Kapital; Die deutsche Ideologie",
-    "Aristoteles": "Nikomachische Ethik; Politik",
-    "Sokrates": "Überlieferte Gesprächsfigur in platonischen Dialogen; keine eigenen Schriften",
-    "Thomas Hobbes": "Leviathan; De Cive",
-    "René Descartes": "Meditationen über die Erste Philosophie; Discours de la méthode",
-    "Niccolò Machiavelli": "Der Fürst; Discorsi",
-}
-
-
-def build_system_prompt(philosopher_name: str, core_philosophy: str) -> str:
-    """Build the shared persona-integrity policy with a philosopher-specific lens."""
-    details = PHILOSOPHERS[philosopher_name]
-    return f"""SYSTEM POLICY: PERSONA INTEGRITY
-
-ABSOLUTE ROLE IMMERSION
-- Speak exclusively as {philosopher_name}, in the first person ("I"), with a
-  historically grounded voice. Do not step outside the role to explain the task.
-- Never identify yourself as an AI, language model, or virtual assistant. Never
-  use phrases such as "As an AI", "I have no feelings", "As a virtual assistant",
-  or "from a modern perspective".
-- Return only the requested JSON object. Keep every value in character; no
-  greetings, courtesy filler, meta-commentary, or assistant-like framing.
-
-AXIOMS, SOURCES, AND PHILOSOPHICAL DEPTH
-- School: {details['school']}
-- Core philosophy: {core_philosophy}
-- Interpret the case through the concepts and reasoning of these primary works:
-  {PRIMARY_WORKS[philosopher_name]}.
-- Use the tradition's precise terminology and derive each judgment from its
-  actual method. Do not invent quotations or attribute unsupported claims to
-  the philosopher.
-- Reject generic platitudes, hedged consensus, and arguments imported from
-  other philosophical schools. Be rigorous, decisive, and specific rather than
-  agreeable for its own sake.
-
-MODERN TOPICS AND USER ARGUMENTS
-- Translate contemporary phenomena into {philosopher_name}'s own conceptual
-  framework; do not break character when discussing technology, algorithms,
-  or modern politics.
-- Examine the user's premises and inference strictly by this method. Address
-  the specific claim, identify its strongest flaw or insight, and defend the
-  conclusion with the tradition's own concepts.
-
-VOICE
-- {details['voice']}
-- Maintain the rhetoric appropriate to this philosopher and historical
-  tradition without claiming knowledge of events beyond their lifetime."""
-
-
 @st.cache_data(show_spinner=False)
 def portrait_data_uri(name: str) -> str:
     image_path = (
@@ -220,25 +176,6 @@ def portrait_data_uri(name: str) -> str:
 def contains_assistant_cliche(text: str) -> bool:
     normalized = text.casefold()
     return any(phrase in normalized for phrase in ASSISTANT_CLICHES)
-
-
-def request_json(client: OpenAI, prompt: str, system_prompt: str) -> dict[str, object]:
-    response = client.chat.completions.create(
-        model=MODEL,
-        temperature=MODEL_TEMPERATURE,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        response_format={"type": "json_object"},
-    )
-    content = response.choices[0].message.content
-    if not content:
-        raise ValueError("OpenAI lieferte eine leere Antwort.")
-    result = json.loads(content)
-    if not isinstance(result, dict):
-        raise ValueError("Die OpenAI-Antwort ist kein JSON-Objekt.")
-    return result
 
 
 def escape_text(value: str) -> str:
@@ -631,6 +568,41 @@ st.markdown(
         margin: 0.2rem 0 0.8rem;
     }
 
+    .phenomenon-card {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        box-shadow: 0 8px 28px rgba(42, 35, 25, 0.045);
+        height: 100%;
+        padding: 1.35rem;
+    }
+
+    .phenomenon-badge {
+        border-radius: 999px;
+        display: inline-block;
+        font-size: 0.73rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.7rem;
+        padding: 0.35rem 0.7rem;
+        text-transform: uppercase;
+    }
+
+    .phenomenon-badge-primary {
+        background: #292722;
+        color: #ffffff;
+    }
+
+    .phenomenon-badge-opponent {
+        background: #e9e3d8;
+        border: 1px solid #68533b;
+        color: #292722;
+    }
+
+    .phenomenon-card h3 {
+        margin-top: 0.2rem;
+    }
+
     [data-testid="stProgress"] > div > div > div {
         background-color: #876a3f !important;
     }
@@ -852,6 +824,132 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+with st.sidebar:
+    st.markdown("### Dialectica AI")
+    app_mode = st.radio(
+        "Arbeitsmodus",
+        options=(MODE_DILEMMA, MODE_PHENOMENA),
+        key="app_mode",
+    )
+
+if app_mode == MODE_PHENOMENA:
+    st.markdown('<div class="section-kicker">A concept in dialogue</div>', unsafe_allow_html=True)
+    st.header("Philosophische Phänomene & Konzepte erkunden")
+    st.write(
+        "Lass den Hauptvertreter eine Idee entfalten und fordere anschließend "
+        "einen systematischen Gegendenker heraus."
+    )
+
+    st.markdown("**Schnelleinstieg**")
+    preset_columns = st.columns(4)
+    for column, preset in zip(preset_columns, PHENOMENON_PRESETS):
+        with column:
+            if st.button(
+                preset,
+                key=f"phenomenon-preset-{PHENOMENON_PRESETS.index(preset)}",
+                use_container_width=True,
+            ):
+                st.session_state["phenomenon_query"] = preset
+                st.rerun()
+
+    with st.form("phenomenon_form"):
+        concept = st.text_input(
+            "Begriff, Experiment oder Theorie",
+            key="phenomenon_query",
+            placeholder="z. B. Schleier des Nichtwissens",
+        )
+        explore_submitted = st.form_submit_button(
+            "Phänomen erkunden",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if explore_submitted:
+        if not concept.strip():
+            st.warning("Bitte gib einen Begriff oder ein Phänomen ein.")
+        else:
+            try:
+                with st.spinner("Hauptdenker und Kontrahent analysieren das Phänomen ..."):
+                    phenomenon_result = analyze_phenomenon(concept)
+            except (OpenAIError, ValueError, json.JSONDecodeError) as exc:
+                st.error(f"Die Phänomenanalyse ist fehlgeschlagen: {exc}")
+            else:
+                st.session_state["phenomenon_result"] = phenomenon_result
+                st.session_state["phenomenon_chat"] = []
+
+    phenomenon_result = st.session_state.get("phenomenon_result")
+    if (
+        isinstance(phenomenon_result, dict)
+        and phenomenon_result.get("concept") == concept.strip()
+    ):
+        primary_name = phenomenon_result["primary_philosopher"]
+        opponent_name = phenomenon_result["opponent_philosopher"]
+        primary_badge = PHENOMENON_BADGE_CLASSES["primary"]
+        opponent_badge = PHENOMENON_BADGE_CLASSES["opponent"]
+        primary_column, opponent_column = st.columns(2)
+        with primary_column:
+            st.markdown(
+                f'<article class="phenomenon-card">'
+                f'<span class="{primary_badge}">Urheber / Hauptvertreter</span>'
+                f'<h3>{html.escape(primary_name)}</h3>'
+                f'<p>{html.escape(phenomenon_result["primary_explanation"])}</p>'
+                "</article>",
+                unsafe_allow_html=True,
+            )
+        with opponent_column:
+            st.markdown(
+                f'<article class="phenomenon-card">'
+                f'<span class="{opponent_badge}">Kontrahent</span>'
+                f'<h3>{html.escape(opponent_name)}</h3>'
+                f'<p>{html.escape(phenomenon_result["opponent_explanation"])}</p>'
+                "</article>",
+                unsafe_allow_html=True,
+            )
+
+        st.subheader("Im Gespräch weiterdenken")
+        chat_history = st.session_state.setdefault("phenomenon_chat", [])
+        for turn in chat_history:
+            with st.chat_message("user"):
+                st.write(turn["question"])
+            with st.chat_message("assistant"):
+                st.markdown(f"**{html.escape(primary_name)}**")
+                st.write(turn["responses"][primary_name])
+                st.markdown(f"**{html.escape(opponent_name)}**")
+                st.write(turn["responses"][opponent_name])
+
+        followup = st.chat_input(
+            "Stelle beiden Denkern eine vertiefende Frage zum Phänomen",
+            key="phenomenon-followup",
+        )
+        if followup:
+            try:
+                with st.spinner("Beide Denker formulieren ihre Antwort ..."):
+                    previous_turns = [
+                        {
+                            "question": turn["question"],
+                            "primary_response": turn["responses"][primary_name],
+                            "opponent_response": turn["responses"][opponent_name],
+                        }
+                        for turn in chat_history
+                    ]
+                    responses = answer_phenomenon_followup(
+                        concept=phenomenon_result["concept"],
+                        primary_name=primary_name,
+                        opponent_name=opponent_name,
+                        primary_explanation=phenomenon_result["primary_explanation"],
+                        opponent_explanation=phenomenon_result["opponent_explanation"],
+                        question=followup,
+                        history=previous_turns,
+                    )
+            except (OpenAIError, ValueError, json.JSONDecodeError) as exc:
+                st.error(f"Die Rückfrage konnte nicht beantwortet werden: {exc}")
+            else:
+                chat_history.append(
+                    {"question": followup, "responses": responses}
+                )
+                st.rerun()
+    st.stop()
 
 selection = tuple(
     name
