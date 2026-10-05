@@ -1,2 +1,2 @@
 # Moral-Risk-Audit
-An AI driven analytical tool that evaluates contemporary political and societal dilemmas through three philosophical frameworks of famous thinkers: Immanuel Kant, Friedrich Nietzsche, and Marcus Aurelius.
+**Dialectica AI** ist eine Streamlit-Anwendung für ethische Analysen und philosophische Diskurse im minimalistischen Pergament-Design mit klassischem Sonnen-Logo. Die Plattform kombiniert ein „Dilemma-Audit“ zur Bewertung moralischer Konflikte aus verschiedenen ethischen Perspektiven, die Dekonstruktion komplexer Begriffe im Phänomen-Modus sowie einen interaktiven sokratischen Dialog direkt mit historischen Denkern – vollständig auf Deutsch und für eine intuitive, akademische Nutzung optimiert.
