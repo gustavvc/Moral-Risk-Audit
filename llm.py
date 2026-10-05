@@ -1,7 +1,7 @@
 """OpenAI-backed analysis routines used by the Streamlit application."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import streamlit as st
 from openai import OpenAI, OpenAIError
@@ -18,7 +18,10 @@ from config import (
 )
 from prompts import (
     ChatMessage,
+    DilemmaChatTurn,
     PhenomenonChatTurn,
+    build_dilemma_followup_prompt,
+    build_dilemma_moderator_prompt,
     build_phenomenon_explanation_prompt,
     build_phenomenon_followup_prompt,
     build_phenomenon_moderator_prompt,
@@ -225,6 +228,51 @@ def answer_phenomenon_followup(
     return results
 
 
+def answer_dilemma_followup(
+    dilemma: str,
+    philosophers: Mapping[str, Mapping[str, str]],
+    analyses: Mapping[str, Mapping[str, str]],
+    question: str,
+    target: str,
+    history: Sequence[DilemmaChatTurn] = (),
+    client: OpenAI | None = None,
+) -> dict[str, str]:
+    """Route a dilemma chat turn to one selected thinker or all plus synthesis."""
+    cleaned_question = question.strip()
+    if not dilemma.strip() or not cleaned_question:
+        raise ValueError("Dilemma und Einwand dürfen nicht leer sein.")
+    if len(philosophers) != 3 or set(philosophers) != set(analyses):
+        raise ValueError("Für den Dilemma-Dialog werden drei Analysen benötigt.")
+    if target != CHAT_TARGET_ALL and target not in philosophers:
+        raise ValueError("Das ausgewählte Antwortziel gehört nicht zur Debatte.")
+
+    active_client = _get_client(client)
+    responder_names = tuple(philosophers) if target == CHAT_TARGET_ALL else (target,)
+    responses: dict[str, str] = {}
+    for name in responder_names:
+        messages = build_dilemma_followup_prompt(
+            philosopher_name=name,
+            details=philosophers[name],
+            dilemma=dilemma,
+            analysis=analyses[name],
+            question=cleaned_question,
+            history=history,
+        )
+        responses[name] = _request_text(active_client, messages)
+
+    if target == CHAT_TARGET_ALL:
+        moderator_messages = build_dilemma_moderator_prompt(
+            dilemma=dilemma,
+            question=cleaned_question,
+            responses=responses,
+            history=history,
+        )
+        responses[CHAT_MODERATOR_NAME] = _request_text(
+            active_client, moderator_messages
+        )
+    return responses
+
+
 def _canonical_philosopher_name(
     value: str,
     valid_names: set[str],
@@ -245,6 +293,7 @@ def _canonical_philosopher_name(
 
 __all__ = [
     "OpenAIError",
+    "answer_dilemma_followup",
     "analyze_phenomenon",
     "answer_phenomenon_followup",
     "request_json",

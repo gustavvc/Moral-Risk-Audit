@@ -1,7 +1,7 @@
 """Prompt construction for philosophical persona and phenomenon exploration."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TypedDict
 
 from config import PHILOSOPHER_FRAMEWORKS
@@ -22,6 +22,12 @@ class PhenomenonChatTurn(TypedDict):
     primary_response: str | None
     opponent_response: str | None
     moderator_response: str | None
+
+
+class DilemmaChatTurn(TypedDict):
+    question: str
+    target: str
+    responses: dict[str, str]
 
 
 def build_system_prompt(philosopher_name: str, core_philosophy: str) -> str:
@@ -280,6 +286,109 @@ behaupten. Keine KI-Floskeln und keine unbelegten Zitate. Antworte auf Deutsch."
         "Antworte in drei klar erkennbaren Abschnitten: Gemeinsamer Boden, "
         "Unaufgelöster Konflikt, Weiterführende Frage. Beziehe dich auf beide "
         "konkreten Antworten und unterscheide Synthese von bloßem Kompromiss."
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def build_dilemma_followup_prompt(
+    philosopher_name: str,
+    details: Mapping[str, str],
+    dilemma: str,
+    analysis: Mapping[str, str],
+    question: str,
+    history: Sequence[DilemmaChatTurn] = (),
+) -> list[ChatMessage]:
+    """Build an in-character prompt responding to a user's dilemma objection."""
+    profile = PHILOSOPHER_FRAMEWORKS.get(philosopher_name)
+    if profile is None:
+        raise ValueError(f"Unbekannter Philosoph: {philosopher_name}")
+    cleaned_dilemma = dilemma.strip()
+    cleaned_question = question.strip()
+    if not cleaned_dilemma or not cleaned_question:
+        raise ValueError("Dilemma und Einwand dürfen nicht leer sein.")
+
+    history_entries = []
+    for turn in history:
+        own_reply = turn.get("responses", {}).get(philosopher_name)
+        if own_reply:
+            history_entries.append(
+                f"Frühere Frage oder Einwand: {turn['question']}\n"
+                f"Deine frühere Antwort: {own_reply}"
+            )
+    history_text = "\n\n".join(history_entries)
+    dialogue_context = (
+        f"Dein bisheriger Dialog:\n{history_text}\n\n" if history_text else ""
+    )
+    system_prompt = build_system_prompt(
+        philosopher_name,
+        details["analysis_lens"],
+    )
+    user_prompt = (
+        f"Das ethische Dilemma:\n{cleaned_dilemma}\n\n"
+        f"Dein bisheriges Urteil:\n"
+        f"Position: {analysis['position']}\n"
+        f"Begründung: {analysis['reasoning']}\n"
+        f"Fazit: {analysis['conclusion']}\n\n"
+        f"{dialogue_context}"
+        f"Einwand oder Frage der Nutzerin oder des Nutzers:\n"
+        f"{json.dumps(cleaned_question, ensure_ascii=False)}\n\n"
+        "Antworte ausschließlich aus deiner eigenen philosophischen Position. "
+        "Greife mindestens einen konkreten Gedanken des Einwands auf, prüfe "
+        "ihn nach deiner Methode und verteidige, korrigiere oder präzisiere "
+        "dein Urteil. Keine allgemeine Wiederholung und keine fremde Denkschule. "
+        "Antworte auf Deutsch, direkt und prägnant."
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def build_dilemma_moderator_prompt(
+    dilemma: str,
+    question: str,
+    responses: Mapping[str, str],
+    history: Sequence[DilemmaChatTurn] = (),
+) -> list[ChatMessage]:
+    """Build a neutral synthesis of the selected thinkers' latest replies."""
+    if len(responses) != 3:
+        raise ValueError("Die Synthese benötigt genau drei Philosophenantworten.")
+    cleaned_dilemma = dilemma.strip()
+    cleaned_question = question.strip()
+    if not cleaned_dilemma or not cleaned_question:
+        raise ValueError("Dilemma und Einwand dürfen nicht leer sein.")
+    response_text = "\n\n".join(
+        f"{name}:\n{response}" for name, response in responses.items()
+    )
+    history_text = "\n\n".join(
+        f"Frühere Frage: {turn['question']}\n"
+        + "\n".join(
+            f"{name}: {response}"
+            for name, response in turn.get("responses", {}).items()
+        )
+        for turn in history
+    )
+    dialogue_context = (
+        f"Bisheriger Dialog:\n{history_text}\n\n" if history_text else ""
+    )
+    system_prompt = (
+        "Du bist eine neutrale philosophische Moderation, keine der beteiligten "
+        "Personas. Vergleiche die vorliegenden Argumente fair und prägnant. "
+        "Benenne einen konkreten gemeinsamen Punkt und den normativen Konflikt, "
+        "ohne einen künstlichen Konsens zu behaupten. Keine KI-Floskeln. "
+        "Antworte auf Deutsch."
+    )
+    user_prompt = (
+        f"Ethisches Dilemma:\n{cleaned_dilemma}\n\n"
+        f"{dialogue_context}"
+        f"Einwand oder Frage:\n{json.dumps(cleaned_question, ensure_ascii=False)}\n\n"
+        f"Antworten der drei Denker:\n{response_text}\n\n"
+        "Formuliere eine kurze Synthese mit zwei klar bezeichneten Punkten: "
+        "Gemeinsamer Boden und ungelöster Konflikt. Stütze beides auf die "
+        "konkreten Antworten."
     )
     return [
         {"role": "system", "content": system_prompt},
