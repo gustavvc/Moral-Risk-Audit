@@ -135,16 +135,24 @@ PHILOSOPHERS = {
 
 @st.cache_data(show_spinner=False)
 def portrait_data_uri(name):
-    from pathlib import Path
     import base64
+    import unicodedata
+    from pathlib import Path
 
     base_dir = Path(__file__).resolve().parent
-    slug = str(name).lower().strip().replace(" ", "-").replace("_", "-")
     
-    # Prüft sowohl das Hauptverzeichnis als auch den Unterordner "assets/portraits"
+    # 1. Entfernt Akzente (z.B. "René" -> "Rene", "Niccolò" -> "Niccolo")
+    normalized_name = unicodedata.normalize('NFKD', str(name)).encode('ASCII', 'ignore').decode('utf-8')
+    
+    # 2. Wandelt in Kleinbuchstaben mit Bindestrichen um (z.B. "rene-descartes")
+    slug = normalized_name.lower().strip().replace(" ", "-").replace("_", "-")
+    raw_slug = str(name).lower().strip().replace(" ", "-").replace("_", "-")
+    
     candidates = [
         base_dir / f"{slug}.jpg",
         base_dir / f"{slug}.png",
+        base_dir / f"{raw_slug}.jpg",
+        base_dir / f"{raw_slug}.png",
         base_dir / f"{name}.jpg",
         base_dir / f"{name}.png",
         base_dir / "assets" / "portraits" / f"{slug}.jpg",
@@ -157,7 +165,6 @@ def portrait_data_uri(name):
             mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
             return f"data:{mime};base64,{encoded}"
             
-    # Falls ein Bild komplett fehlt, stürzt die App nicht mehr ab
     return ""
 
 
