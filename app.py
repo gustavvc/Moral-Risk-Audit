@@ -134,12 +134,31 @@ PHILOSOPHERS = {
 
 
 @st.cache_data(show_spinner=False)
-def portrait_data_uri(name: str) -> str:
-    """Load the bundled historical portrait without making a network request."""
-    image_path = Path(__file__).resolve().parent / "assets" / "portraits" / PHILOSOPHERS[name]["portrait"]
-    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-    mime_type = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
-    return f"data:{mime_type};base64,{encoded}"
+def portrait_data_uri(name):
+    from pathlib import Path
+    import base64
+
+    base_dir = Path(__file__).resolve().parent
+    slug = str(name).lower().strip().replace(" ", "-").replace("_", "-")
+    
+    # Prüft sowohl das Hauptverzeichnis als auch den Unterordner "assets/portraits"
+    candidates = [
+        base_dir / f"{slug}.jpg",
+        base_dir / f"{slug}.png",
+        base_dir / f"{name}.jpg",
+        base_dir / f"{name}.png",
+        base_dir / "assets" / "portraits" / f"{slug}.jpg",
+        base_dir / "assets" / "portraits" / f"{slug}.png",
+    ]
+    
+    for path in candidates:
+        if path.exists():
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+            return f"data:{mime};base64,{encoded}"
+            
+    # Falls ein Bild komplett fehlt, stürzt die App nicht mehr ab
+    return ""
 
 
 def contains_assistant_cliche(text: str) -> bool:
