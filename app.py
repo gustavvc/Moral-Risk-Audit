@@ -1,8 +1,6 @@
 import html
 import json
-import base64
 from itertools import combinations
-from pathlib import Path
 
 import streamlit as st
 from openai import OpenAI
@@ -12,6 +10,7 @@ from config import (
     MODE_PHENOMENA,
     PHENOMENON_BADGE_CLASSES,
     PHENOMENON_PRESETS,
+    PHILOSOPHER_FRAMEWORKS,
 )
 from prompts import build_system_prompt
 from utils.llm import (
@@ -20,6 +19,7 @@ from utils.llm import (
     answer_phenomenon_followup,
     request_json,
 )
+from utils.assets import portrait_data_uri
 
 
 APP_NAME = "Dialectica AI"
@@ -158,21 +158,6 @@ PHILOSOPHERS = {
     },
 }
 
-@st.cache_data(show_spinner=False)
-def portrait_data_uri(name: str) -> str:
-    image_path = (
-        Path(__file__).resolve().parent
-        / "assets"
-        / "portraits"
-        / PHILOSOPHERS[name]["portrait"]
-    )
-    if not image_path.is_file():
-        raise FileNotFoundError(f"Das Porträt für {name} fehlt: {image_path}")
-    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-    mime_type = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
-    return f"data:{mime_type};base64,{encoded}"
-
-
 def contains_assistant_cliche(text: str) -> bool:
     normalized = text.casefold()
     return any(phrase in normalized for phrase in ASSISTANT_CLICHES)
@@ -180,6 +165,59 @@ def contains_assistant_cliche(text: str) -> bool:
 
 def escape_text(value: str) -> str:
     return html.escape(value).replace("\n", "<br>")
+
+
+def get_philosopher_details(name: str) -> dict[str, str]:
+    """Return UI metadata for selectable and routing-only philosophers."""
+    details = PHILOSOPHERS.get(name)
+    if details is not None:
+        return details
+    framework = PHILOSOPHER_FRAMEWORKS.get(name)
+    if framework is None:
+        raise ValueError(f"Unbekannter Philosoph: {name}")
+    slug = "-".join(name.casefold().split())
+    return {
+        "key": slug,
+        "school": framework["school"],
+        "alt": f"Porträt für {name} ist nicht im lokalen Bildbestand vorhanden.",
+    }
+
+
+def render_philosopher_identity(
+    name: str,
+    badge_label: str | None = None,
+    badge_class: str | None = None,
+) -> None:
+    """Render the shared portrait, name, and school header used by both modes."""
+    details = get_philosopher_details(name)
+    if badge_label and badge_class:
+        st.markdown(
+            f'<span class="{badge_class}">{html.escape(badge_label)}</span>',
+            unsafe_allow_html=True,
+        )
+    if "portrait" in details:
+        st.markdown(
+            f'<div class="portrait-stage"><a href="{html.escape(details["portrait_source"], quote=True)}" '
+            f'target="_blank" rel="noopener noreferrer">'
+            f'<img src="{portrait_data_uri(details["portrait"])}" '
+            f'alt="{html.escape(details["alt"], quote=True)}" '
+            f'class="portrait-image" decoding="async"></a></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        initials = "".join(part[0] for part in name.split() if part)
+        st.markdown(
+            '<div class="portrait-stage">'
+            f'<div class="portrait-fallback" role="img" '
+            f'aria-label="{html.escape(details["alt"], quote=True)}">'
+            f'{html.escape(initials)}</div></div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown(
+        f'<h3 class="philosopher-heading">{html.escape(name)}</h3>'
+        f'<p class="school-label">{html.escape(details["school"])}</p>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_perspective_card(
@@ -198,19 +236,7 @@ def render_perspective_card(
                     'AKTUELLER BEITRAG</div>',
                     unsafe_allow_html=True,
                 )
-            st.markdown(
-                f'<div class="portrait-stage"><a href="{html.escape(details["portrait_source"], quote=True)}" '
-                f'target="_blank" rel="noopener noreferrer">'
-                f'<img src="{portrait_data_uri(name)}" '
-                f'alt="{html.escape(details["alt"], quote=True)}" '
-                f'class="portrait-image" decoding="async"></a></div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f'<h3 class="philosopher-heading">{html.escape(name)}</h3>'
-                f'<p class="school-label">{html.escape(details["school"])}</p>',
-                unsafe_allow_html=True,
-            )
+            render_philosopher_identity(name)
             if perspective is None:
                 st.markdown(
                     '<div class="analysis-placeholder">Die Analyse erscheint '
@@ -229,6 +255,28 @@ def render_perspective_card(
                         f'<p>{escape_text(perspective[field])}</p></div>',
                         unsafe_allow_html=True,
                     )
+
+
+def render_phenomenon_card(
+    column: st.delta_generator.DeltaGenerator,
+    name: str,
+    role_label: str,
+    badge_class: str,
+    explanation: str,
+) -> None:
+    """Render an exploration result with the same card and portrait as the audit."""
+    details = get_philosopher_details(name)
+    with column:
+        with st.container(key=f"perspective-{details['key']}"):
+            render_philosopher_identity(name, role_label, badge_class)
+            st.markdown(
+                '<div class="argument-block">'
+                '<span class="argument-label">Philosophische Einordnung</span>'
+                f'<p>{escape_text(explanation)}</p></div>',
+                unsafe_allow_html=True,
+            )
+
+
 def render_consensus(consensus: dict[str, object]) -> None:
     score = consensus["agreement_score"]
     st.markdown(
@@ -300,6 +348,42 @@ st.markdown(
     .block-container {
         max-width: 1500px;
         padding: 2.5rem 2rem 4rem;
+    }
+
+    [data-testid="stSidebar"] {
+        background: #f4f1ea !important;
+        border-right: 1px solid var(--line);
+    }
+
+    .st-key-app_mode [data-testid="stWidgetLabel"] p {
+        color: var(--ink) !important;
+        font-family: Georgia, "Times New Roman", serif !important;
+        font-size: 1.15rem !important;
+        font-weight: 700 !important;
+    }
+
+    .st-key-app_mode [data-testid="stRadioGroup"] {
+        gap: 0.55rem;
+    }
+
+    .st-key-app_mode [data-testid="stRadioOption"] {
+        background: #ffffff;
+        border: 1px solid #bdb5a8;
+        border-radius: 8px;
+        color: var(--ink);
+        padding: 0.72rem 0.8rem;
+        transition: background 150ms ease, border-color 150ms ease;
+    }
+
+    .st-key-app_mode [data-testid="stRadioOption"][data-selected="true"] {
+        background: #24211d;
+        border-color: #24211d;
+        color: #ffffff;
+    }
+
+    .st-key-app_mode [data-testid="stRadioOption"][data-selected="true"]
+    [data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important;
     }
 
     .masthead {
@@ -377,6 +461,17 @@ st.markdown(
         opacity: 1;
     }
 
+    [data-testid="stTextInput"] input,
+    [data-testid="stChatInput"] textarea {
+        background: #ffffff !important;
+        border: 1.5px solid #625e56 !important;
+        border-radius: 8px !important;
+        color: var(--ink) !important;
+        font-size: 1rem !important;
+        line-height: 1.55 !important;
+        min-height: 2.9rem;
+    }
+
     [data-testid="stTextArea"] textarea:focus,
     [data-testid="stCheckbox"] input:focus-visible,
     button:focus-visible {
@@ -446,6 +541,21 @@ st.markdown(
         margin: 0 auto 0.75rem;
         max-width: 100%;
         overflow: hidden;
+    }
+
+    .portrait-fallback {
+        align-items: center;
+        background: #f2eee5;
+        border: 1px solid #d7d0c4;
+        border-radius: 50%;
+        color: #292722;
+        display: flex;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 2.5rem;
+        font-weight: 700;
+        height: 170px;
+        justify-content: center;
+        width: 170px;
     }
 
     .portrait-image {
@@ -579,11 +689,11 @@ st.markdown(
 
     .phenomenon-badge {
         border-radius: 999px;
-        display: inline-block;
+        display: table;
         font-size: 0.73rem;
         font-weight: 800;
         letter-spacing: 0.08em;
-        margin-bottom: 0.7rem;
+        margin: 0 auto 0.9rem;
         padding: 0.35rem 0.7rem;
         text-transform: uppercase;
     }
@@ -869,6 +979,8 @@ if app_mode == MODE_PHENOMENA:
         if not concept.strip():
             st.warning("Bitte gib einen Begriff oder ein Phänomen ein.")
         else:
+            st.session_state["phenomenon_result"] = None
+            st.session_state["phenomenon_chat"] = []
             try:
                 with st.spinner("Hauptdenker und Kontrahent analysieren das Phänomen ..."):
                     phenomenon_result = analyze_phenomenon(concept)
@@ -882,34 +994,60 @@ if app_mode == MODE_PHENOMENA:
     if (
         isinstance(phenomenon_result, dict)
         and phenomenon_result.get("concept") == concept.strip()
+        and isinstance(phenomenon_result.get("primary_philosopher"), str)
+        and phenomenon_result["primary_philosopher"] in PHILOSOPHER_FRAMEWORKS
+        and isinstance(phenomenon_result.get("opponent_philosopher"), str)
+        and phenomenon_result["opponent_philosopher"] in PHILOSOPHER_FRAMEWORKS
+        and phenomenon_result.get("primary_philosopher")
+        != phenomenon_result.get("opponent_philosopher")
+        and isinstance(phenomenon_result.get("primary_explanation"), str)
+        and isinstance(phenomenon_result.get("opponent_explanation"), str)
     ):
         primary_name = phenomenon_result["primary_philosopher"]
         opponent_name = phenomenon_result["opponent_philosopher"]
         primary_badge = PHENOMENON_BADGE_CLASSES["primary"]
         opponent_badge = PHENOMENON_BADGE_CLASSES["opponent"]
         primary_column, opponent_column = st.columns(2)
-        with primary_column:
-            st.markdown(
-                f'<article class="phenomenon-card">'
-                f'<span class="{primary_badge}">Urheber / Hauptvertreter</span>'
-                f'<h3>{html.escape(primary_name)}</h3>'
-                f'<p>{html.escape(phenomenon_result["primary_explanation"])}</p>'
-                "</article>",
-                unsafe_allow_html=True,
-            )
-        with opponent_column:
-            st.markdown(
-                f'<article class="phenomenon-card">'
-                f'<span class="{opponent_badge}">Kontrahent</span>'
-                f'<h3>{html.escape(opponent_name)}</h3>'
-                f'<p>{html.escape(phenomenon_result["opponent_explanation"])}</p>'
-                "</article>",
-                unsafe_allow_html=True,
-            )
+        render_phenomenon_card(
+            primary_column,
+            primary_name,
+            "Urheber / Hauptvertreter",
+            primary_badge,
+            phenomenon_result["primary_explanation"],
+        )
+        render_phenomenon_card(
+            opponent_column,
+            opponent_name,
+            "Kontrahent",
+            opponent_badge,
+            phenomenon_result["opponent_explanation"],
+        )
 
         st.subheader("Im Gespräch weiterdenken")
-        chat_history = st.session_state.setdefault("phenomenon_chat", [])
+        raw_chat_history = st.session_state.get("phenomenon_chat")
+        chat_history = (
+            raw_chat_history if isinstance(raw_chat_history, list) else []
+        )
+        if chat_history is not raw_chat_history:
+            st.session_state["phenomenon_chat"] = chat_history
+        valid_chat_history = [
+            turn
+            for turn in chat_history
+            if isinstance(turn, dict)
+            and isinstance(turn.get("question"), str)
+            and isinstance(turn.get("responses"), dict)
+            and isinstance(turn["responses"].get(primary_name), str)
+            and isinstance(turn["responses"].get(opponent_name), str)
+        ]
         for turn in chat_history:
+            if (
+                not isinstance(turn, dict)
+                or not isinstance(turn.get("question"), str)
+                or not isinstance(turn.get("responses"), dict)
+                or not isinstance(turn["responses"].get(primary_name), str)
+                or not isinstance(turn["responses"].get(opponent_name), str)
+            ):
+                continue
             with st.chat_message("user"):
                 st.write(turn["question"])
             with st.chat_message("assistant"):
@@ -931,7 +1069,7 @@ if app_mode == MODE_PHENOMENA:
                             "primary_response": turn["responses"][primary_name],
                             "opponent_response": turn["responses"][opponent_name],
                         }
-                        for turn in chat_history
+                        for turn in valid_chat_history
                     ]
                     responses = answer_phenomenon_followup(
                         concept=phenomenon_result["concept"],
@@ -945,9 +1083,7 @@ if app_mode == MODE_PHENOMENA:
             except (OpenAIError, ValueError, json.JSONDecodeError) as exc:
                 st.error(f"Die Rückfrage konnte nicht beantwortet werden: {exc}")
             else:
-                chat_history.append(
-                    {"question": followup, "responses": responses}
-                )
+                chat_history.append({"question": followup, "responses": responses})
                 st.rerun()
     st.stop()
 
@@ -1333,7 +1469,7 @@ for row_start in range(0, len(philosopher_items), 4):
                     f'href="{html.escape(details["portrait_source"], quote=True)}" '
                     f'target="_blank" rel="noopener noreferrer">'
                     f'<img class="choice-portrait" decoding="async" '
-                    f'src="{portrait_data_uri(name)}" '
+                    f'src="{portrait_data_uri(details["portrait"])}" '
                     f'alt="{html.escape(details["alt"], quote=True)}"></a></div>'
                     f'<div class="choice-name">{html.escape(name)}</div>'
                     f'<div class="choice-school">{html.escape(details["school"])}</div>'

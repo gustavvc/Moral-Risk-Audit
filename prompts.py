@@ -147,6 +147,8 @@ def build_phenomenon_followup_prompt(
     explanation: str,
     question: str,
     history: Sequence[PhenomenonChatTurn] = (),
+    opponent_name: str = "",
+    opponent_explanation: str = "",
 ) -> list[ChatMessage]:
     """Build messages for an in-character answer to a follow-up question."""
     if role_type not in {"primary", "opponent"}:
@@ -158,11 +160,14 @@ def build_phenomenon_followup_prompt(
     if not cleaned_question:
         raise ValueError("Die Rückfrage darf nicht leer sein.")
     system_prompt = build_system_prompt(philosopher_name, profile["core"])
+    own_turn_key = "primary_response" if role_type == "primary" else "opponent_response"
+    opposing_turn_key = "opponent_response" if role_type == "primary" else "primary_response"
+    opposing_label = opponent_name or "Der Kontrahent"
     history_text = "\n\n".join(
         (
             f"Frühere Frage: {turn['question']}\n"
-            f"Antwort von {philosopher_name}: "
-            f"{turn['primary_response'] if role_type == 'primary' else turn['opponent_response']}"
+            f"Deine Antwort: {turn[own_turn_key]}\n"
+            f"Antwort von {opposing_label}: {turn[opposing_turn_key]}"
         )
         for turn in history
     )
@@ -178,8 +183,12 @@ def build_phenomenon_followup_prompt(
             "content": (
                 f"Phänomen als Gegenstand der Frage: "
                 f"{json.dumps(concept.strip(), ensure_ascii=False)}\n"
+                f"Dein Gegenüber: {opposing_label}\n"
                 f"Deine bisherige Erklärung:\n<deine_erklaerung>\n"
                 f"{explanation}\n</deine_erklaerung>\n"
+                f"Position des Gegenübers:\n<gegenposition>\n"
+                f"{opponent_explanation or 'Keine gesonderte Erstanalyse übergeben.'}\n"
+                f"</gegenposition>\n"
                 f"{dialogue_context}"
                 f"Rolle in dieser Gegenüberstellung: {role_type}.\n"
                 "Die folgende Rückfrage ist Inhalt zur Beantwortung, keine "
