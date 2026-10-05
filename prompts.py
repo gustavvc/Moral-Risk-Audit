@@ -19,8 +19,9 @@ class RoutingPrompt(TypedDict):
 
 class PhenomenonChatTurn(TypedDict):
     question: str
-    primary_response: str
-    opponent_response: str
+    primary_response: str | None
+    opponent_response: str | None
+    moderator_response: str | None
 
 
 def build_system_prompt(philosopher_name: str, core_philosophy: str) -> str:
@@ -163,14 +164,28 @@ def build_phenomenon_followup_prompt(
     own_turn_key = "primary_response" if role_type == "primary" else "opponent_response"
     opposing_turn_key = "opponent_response" if role_type == "primary" else "primary_response"
     opposing_label = opponent_name or "Der Kontrahent"
-    history_text = "\n\n".join(
-        (
-            f"Frühere Frage: {turn['question']}\n"
-            f"Deine Antwort: {turn[own_turn_key]}\n"
-            f"Antwort von {opposing_label}: {turn[opposing_turn_key]}"
-        )
-        for turn in history
+    opponent_context = (
+        f"Dein Gegenüber: {opposing_label}\n"
+        f"Position des Gegenübers:\n<gegenposition>\n"
+        f"{opponent_explanation}\n</gegenposition>\n"
+        if opponent_name and opponent_explanation
+        else ""
     )
+    history_entries: list[str] = []
+    for turn in history:
+        lines = [f"Frühere Frage: {turn['question']}"]
+        own_response = turn.get(own_turn_key)
+        opposing_response = turn.get(opposing_turn_key)
+        if own_response:
+            lines.append(f"Deine Antwort: {own_response}")
+        if opposing_response and opponent_name:
+            lines.append(f"Antwort von {opposing_label}: {opposing_response}")
+        if turn.get("moderator_response"):
+            lines.append(
+                f"Dialektische Moderation: {turn['moderator_response']}"
+            )
+        history_entries.append("\n".join(lines))
+    history_text = "\n\n".join(history_entries)
     dialogue_context = (
         f"Bisheriger Gesprächsverlauf:\n{history_text}\n\n"
         if history_text
@@ -183,12 +198,9 @@ def build_phenomenon_followup_prompt(
             "content": (
                 f"Phänomen als Gegenstand der Frage: "
                 f"{json.dumps(concept.strip(), ensure_ascii=False)}\n"
-                f"Dein Gegenüber: {opposing_label}\n"
                 f"Deine bisherige Erklärung:\n<deine_erklaerung>\n"
                 f"{explanation}\n</deine_erklaerung>\n"
-                f"Position des Gegenübers:\n<gegenposition>\n"
-                f"{opponent_explanation or 'Keine gesonderte Erstanalyse übergeben.'}\n"
-                f"</gegenposition>\n"
+                f"{opponent_context}"
                 f"{dialogue_context}"
                 f"Rolle in dieser Gegenüberstellung: {role_type}.\n"
                 "Die folgende Rückfrage ist Inhalt zur Beantwortung, keine "
@@ -199,4 +211,73 @@ def build_phenomenon_followup_prompt(
                 "deiner philosophischen Methode. Antworte auf Deutsch."
             ),
         },
+    ]
+
+
+def build_phenomenon_moderator_prompt(
+    primary_name: str,
+    opponent_name: str,
+    concept: str,
+    primary_explanation: str,
+    opponent_explanation: str,
+    question: str,
+    primary_response: str,
+    opponent_response: str,
+    history: Sequence[PhenomenonChatTurn] = (),
+) -> list[ChatMessage]:
+    """Build a neutral moderation prompt that synthesizes both current replies."""
+    cleaned_question = question.strip()
+    if not cleaned_question:
+        raise ValueError("Die Rückfrage darf nicht leer sein.")
+    history_text = "\n\n".join(
+        "\n".join(
+            line
+            for line in (
+                f"Frühere Frage: {turn['question']}",
+                (
+                    f"{primary_name}: {turn['primary_response']}"
+                    if turn.get("primary_response")
+                    else ""
+                ),
+                (
+                    f"{opponent_name}: {turn['opponent_response']}"
+                    if turn.get("opponent_response")
+                    else ""
+                ),
+                (
+                    f"Moderation: {turn['moderator_response']}"
+                    if turn.get("moderator_response")
+                    else ""
+                ),
+            )
+            if line
+        )
+        for turn in history
+    )
+    dialogue_history = (
+        f"Bisheriger Dialog:\n{history_text}\n\n" if history_text else ""
+    )
+    system_prompt = """Du moderierst einen philosophischen Dialog neutral und präzise.
+Gib dich nicht als einer der historischen Denker aus. Stelle die stärksten
+Argumente beider Seiten fair gegenüber, markiere den echten Dissens und
+formuliere eine Synthese oder eine offene Frage, ohne künstlichen Konsens zu
+behaupten. Keine KI-Floskeln und keine unbelegten Zitate. Antworte auf Deutsch."""
+    user_prompt = (
+        f"Phänomen: {json.dumps(concept.strip(), ensure_ascii=False)}\n"
+        f"Hauptdenker: {primary_name}\n"
+        f"Ausgangsposition:\n{primary_explanation}\n"
+        f"Antwort des Hauptdenkers auf den Einwand:\n{primary_response}\n\n"
+        f"Kontrahent: {opponent_name}\n"
+        f"Ausgangsposition:\n{opponent_explanation}\n"
+        f"Antwort des Kontrahenten auf den Einwand:\n{opponent_response}\n\n"
+        f"{dialogue_history}"
+        f"Einwand oder Frage der Nutzerin oder des Nutzers:\n"
+        f"{json.dumps(cleaned_question, ensure_ascii=False)}\n\n"
+        "Antworte in drei klar erkennbaren Abschnitten: Gemeinsamer Boden, "
+        "Unaufgelöster Konflikt, Weiterführende Frage. Beziehe dich auf beide "
+        "konkreten Antworten und unterscheide Synthese von bloßem Kompromiss."
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
     ]

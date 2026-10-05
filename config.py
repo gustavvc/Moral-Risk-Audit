@@ -18,6 +18,17 @@ MODE_PHENOMENA: Final = "Philosophische Phänomene erkunden"
 PHENOMENON_BADGE_CLASSES: Final[dict[str, str]] = {
     "primary": "phenomenon-badge phenomenon-badge-primary",
     "opponent": "phenomenon-badge phenomenon-badge-opponent",
+    "moderator": "phenomenon-badge phenomenon-badge-moderator",
+}
+
+CHAT_TARGET_PRIMARY: Final = "primary"
+CHAT_TARGET_OPPONENT: Final = "opponent"
+CHAT_TARGET_ALL: Final = "all"
+CHAT_MODERATOR_NAME: Final = "Dialektische Moderation"
+CHAT_TARGET_LABELS: Final[dict[str, str]] = {
+    CHAT_TARGET_PRIMARY: "Hauptdenker",
+    CHAT_TARGET_OPPONENT: "Kontrahent",
+    CHAT_TARGET_ALL: "Alle 3 · Dialektischer Diskurs",
 }
 
 # The profile is shared by prompt construction and LLM routing validation.

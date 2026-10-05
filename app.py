@@ -6,13 +6,18 @@ import streamlit as st
 from openai import OpenAI
 
 from config import (
+    CHAT_MODERATOR_NAME,
+    CHAT_TARGET_ALL,
+    CHAT_TARGET_LABELS,
+    CHAT_TARGET_OPPONENT,
+    CHAT_TARGET_PRIMARY,
     MODE_DILEMMA,
     MODE_PHENOMENA,
     PHENOMENON_BADGE_CLASSES,
     PHENOMENON_PRESETS,
     PHILOSOPHER_FRAMEWORKS,
 )
-from prompts import build_system_prompt
+from prompts import PhenomenonChatTurn, build_system_prompt
 from utils.llm import (
     OpenAIError,
     analyze_phenomenon,
@@ -223,38 +228,24 @@ def render_philosopher_identity(
 def render_perspective_card(
     column: st.delta_generator.DeltaGenerator,
     name: str,
-    perspective: dict[str, str] | None,
-    active: bool,
+    perspective: dict[str, str],
 ) -> None:
     details = PHILOSOPHERS[name]
     slug = details["key"]
     with column:
         with st.container(key=f"perspective-{slug}"):
-            if active:
-                st.markdown(
-                    '<div class="speaker-label" role="status" aria-live="polite">'
-                    'AKTUELLER BEITRAG</div>',
-                    unsafe_allow_html=True,
-                )
             render_philosopher_identity(name)
-            if perspective is None:
+            for title, field in (
+                ("Position", "position"),
+                ("Begründung", "reasoning"),
+                ("Fazit", "conclusion"),
+            ):
                 st.markdown(
-                    '<div class="analysis-placeholder">Die Analyse erscheint '
-                    "hier, sobald die Debatte gestartet wurde.</div>",
+                    '<div class="argument-block">'
+                    f'<span class="argument-label">{title}</span>'
+                    f'<p>{escape_text(perspective[field])}</p></div>',
                     unsafe_allow_html=True,
                 )
-            else:
-                for title, field in (
-                    ("Position", "position"),
-                    ("Begründung", "reasoning"),
-                    ("Fazit", "conclusion"),
-                ):
-                    st.markdown(
-                        '<div class="argument-block">'
-                        f'<span class="argument-label">{title}</span>'
-                        f'<p>{escape_text(perspective[field])}</p></div>',
-                        unsafe_allow_html=True,
-                    )
 
 
 def render_phenomenon_card(
@@ -275,6 +266,43 @@ def render_phenomenon_card(
                 f'<p>{escape_text(explanation)}</p></div>',
                 unsafe_allow_html=True,
             )
+
+
+def render_phenomenon_chat_turn(
+    turn: dict[str, object],
+    primary_name: str,
+    opponent_name: str,
+) -> None:
+    """Show each question's chosen audience and the responses it produced."""
+    target = turn.get("target")
+    if not isinstance(target, str) or target not in CHAT_TARGET_LABELS:
+        target = CHAT_TARGET_ALL
+    with st.chat_message("user"):
+        st.markdown(
+            '<span class="chat-target-label">'
+            f"Frage an: {html.escape(CHAT_TARGET_LABELS[target])}</span>",
+            unsafe_allow_html=True,
+        )
+        st.write(turn["question"])
+
+    responses = turn.get("responses")
+    if not isinstance(responses, dict):
+        return
+    badge_classes = {
+        primary_name: PHENOMENON_BADGE_CLASSES["primary"],
+        opponent_name: PHENOMENON_BADGE_CLASSES["opponent"],
+        CHAT_MODERATOR_NAME: PHENOMENON_BADGE_CLASSES["moderator"],
+    }
+    with st.chat_message("assistant"):
+        for responder in (primary_name, opponent_name, CHAT_MODERATOR_NAME):
+            response = responses.get(responder)
+            if isinstance(response, str) and response.strip():
+                st.markdown(
+                    f'<span class="chat-response-label {badge_classes[responder]}">'
+                    f'{html.escape(responder)}</span>',
+                    unsafe_allow_html=True,
+                )
+                st.write(response)
 
 
 def render_consensus(consensus: dict[str, object]) -> None:
@@ -521,18 +549,6 @@ st.markdown(
         transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
     }
 
-    [class*="st-key-perspective-"]:has(.speaker-label) {
-        animation: active-card-glow 1.8s ease-in-out infinite alternate;
-        border: 3px solid #211f1b;
-        transform: scale(1.08);
-        z-index: 2;
-    }
-
-    @keyframes active-card-glow {
-        from { box-shadow: 0 10px 30px rgba(42, 35, 25, 0.12); }
-        to { box-shadow: 0 18px 42px rgba(135, 106, 63, 0.28); }
-    }
-
     .portrait-stage {
         align-items: center;
         display: flex;
@@ -571,41 +587,6 @@ st.markdown(
         height: 100%;
     }
 
-    [class*="st-key-perspective-"]:has(.speaker-label) .portrait-image {
-        filter: drop-shadow(0 18px 15px rgba(57, 43, 24, 0.38));
-        transform: scale(1.08);
-    }
-
-    .speaker-label {
-        background: #24211d;
-        border: 1px solid #24211d;
-        border-radius: 999px;
-        color: #ffffff;
-        display: table;
-        font-family: Inter, sans-serif;
-        font-size: 0.74rem;
-        font-weight: 800;
-        letter-spacing: 0.075em;
-        margin: 0 auto 0.9rem;
-        padding: 0.4rem 0.7rem;
-        text-align: center;
-    }
-
-    .speaker-label::after {
-        animation: speaking-pulse 1.2s ease-in-out infinite;
-        background: #e4c68e;
-        border-radius: 50%;
-        content: "";
-        display: inline-block;
-        height: 0.5rem;
-        margin-left: 0.5rem;
-        width: 0.5rem;
-    }
-
-    @keyframes speaking-pulse {
-        50% { box-shadow: 0 0 0 5px rgba(228, 198, 142, 0.25); opacity: 0.62; }
-    }
-
     .philosopher-heading {
         font-size: 1.45rem;
         margin: 0.35rem 0 0.1rem;
@@ -622,7 +603,7 @@ st.markdown(
         text-transform: uppercase;
     }
 
-    .argument-block, .analysis-placeholder, .challenge-block {
+    .argument-block, .challenge-block {
         background: #f8f6f1;
         border: 1px solid #e1dbd0;
         border-radius: 8px;
@@ -707,6 +688,30 @@ st.markdown(
         background: #e9e3d8;
         border: 1px solid #68533b;
         color: #292722;
+    }
+
+    .phenomenon-badge-moderator {
+        background: #efe9dd;
+        border: 1px solid #876a3f;
+        color: #292722;
+    }
+
+    .chat-target-label {
+        background: #f2eee5;
+        border: 1px solid #c9c1b5;
+        border-radius: 999px;
+        color: #292722;
+        display: inline-block;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.45rem;
+        padding: 0.25rem 0.65rem;
+    }
+
+    .chat-response-label {
+        display: inline-block;
+        margin: 0.5rem 0 0.15rem;
     }
 
     .phenomenon-card h3 {
@@ -1036,38 +1041,62 @@ if app_mode == MODE_PHENOMENA:
             if isinstance(turn, dict)
             and isinstance(turn.get("question"), str)
             and isinstance(turn.get("responses"), dict)
-            and isinstance(turn["responses"].get(primary_name), str)
-            and isinstance(turn["responses"].get(opponent_name), str)
+            and any(
+                isinstance(turn["responses"].get(responder), str)
+                for responder in (
+                    primary_name,
+                    opponent_name,
+                    CHAT_MODERATOR_NAME,
+                )
+            )
         ]
-        for turn in chat_history:
-            if (
-                not isinstance(turn, dict)
-                or not isinstance(turn.get("question"), str)
-                or not isinstance(turn.get("responses"), dict)
-                or not isinstance(turn["responses"].get(primary_name), str)
-                or not isinstance(turn["responses"].get(opponent_name), str)
-            ):
-                continue
-            with st.chat_message("user"):
-                st.write(turn["question"])
-            with st.chat_message("assistant"):
-                st.markdown(f"**{html.escape(primary_name)}**")
-                st.write(turn["responses"][primary_name])
-                st.markdown(f"**{html.escape(opponent_name)}**")
-                st.write(turn["responses"][opponent_name])
+        for turn in valid_chat_history:
+            render_phenomenon_chat_turn(turn, primary_name, opponent_name)
 
+        current_target = st.session_state.get("phenomenon_chat_target")
+        if (
+            not isinstance(current_target, str)
+            or current_target not in CHAT_TARGET_LABELS
+        ):
+            st.session_state["phenomenon_chat_target"] = CHAT_TARGET_ALL
+        selected_target = st.segmented_control(
+            "Antwortziel",
+            options=(
+                CHAT_TARGET_PRIMARY,
+                CHAT_TARGET_OPPONENT,
+                CHAT_TARGET_ALL,
+            ),
+            format_func=lambda target: CHAT_TARGET_LABELS[target],
+            key="phenomenon_chat_target",
+            help=(
+                "Wähle einen einzelnen Denker oder lasse beide und die "
+                "dialektische Moderation antworten."
+            ),
+            width="stretch",
+        )
         followup = st.chat_input(
-            "Stelle beiden Denkern eine vertiefende Frage zum Phänomen",
+            "Formuliere eine Frage oder einen Einwand",
             key="phenomenon-followup",
         )
         if followup:
+            if (
+                not isinstance(selected_target, str)
+                or selected_target not in CHAT_TARGET_LABELS
+            ):
+                selected_target = CHAT_TARGET_ALL
             try:
-                with st.spinner("Beide Denker formulieren ihre Antwort ..."):
-                    previous_turns = [
+                target_label = CHAT_TARGET_LABELS.get(
+                    selected_target, CHAT_TARGET_LABELS[CHAT_TARGET_ALL]
+                )
+                with st.spinner(f"{target_label} formuliert eine Antwort ..."):
+                    previous_turns: list[PhenomenonChatTurn] = [
                         {
                             "question": turn["question"],
-                            "primary_response": turn["responses"][primary_name],
-                            "opponent_response": turn["responses"][opponent_name],
+                            "primary_response": turn["responses"].get(primary_name),
+                            "opponent_response": turn["responses"].get(opponent_name),
+                            "moderator_response": turn["responses"].get(
+                                CHAT_MODERATOR_NAME
+                            ),
                         }
                         for turn in valid_chat_history
                     ]
@@ -1078,12 +1107,19 @@ if app_mode == MODE_PHENOMENA:
                         primary_explanation=phenomenon_result["primary_explanation"],
                         opponent_explanation=phenomenon_result["opponent_explanation"],
                         question=followup,
+                        target=selected_target,
                         history=previous_turns,
                     )
             except (OpenAIError, ValueError, json.JSONDecodeError) as exc:
                 st.error(f"Die Rückfrage konnte nicht beantwortet werden: {exc}")
             else:
-                chat_history.append({"question": followup, "responses": responses})
+                chat_history.append(
+                    {
+                        "question": followup,
+                        "target": selected_target,
+                        "responses": responses,
+                    }
+                )
                 st.rerun()
     st.stop()
 
@@ -1307,22 +1343,12 @@ matching_debate = (
 
 if len(selection) == 3:
     if matching_debate:
-        active_key = "active_philosopher"
-        if st.session_state.get(active_key) not in selection:
-            st.session_state[active_key] = selection[0]
-        active_name = st.radio(
-            "Aktueller Beitrag",
-            options=selection,
-            key=active_key,
-            horizontal=True,
-        )
         result_columns = st.columns(3)
         for column, name in zip(result_columns, selection):
             render_perspective_card(
                 column,
                 name,
                 saved_debate[name],
-                active=name == active_name,
             )
         st.subheader("Hinterfragen / Sokratischer Dialog")
         st.markdown(
@@ -1422,22 +1448,6 @@ Antworte ausschließlich als JSON mit genau diesem Feld:
                     f'<p>{escape_text(saved_dialogue[name])}</p></div>',
                     unsafe_allow_html=True,
                 )
-    else:
-        st.info(
-            "Die drei ausgewählten Perspektiven erscheinen hier, sobald du "
-            "oben eine Debatte gestartet hast."
-        )
-        waiting_columns = st.columns(3)
-        for column, name in zip(waiting_columns, selection):
-            render_perspective_card(
-                column,
-                name,
-                perspective=None,
-                active=False,
-            )
-else:
-    st.info("Wähle unten genau drei Philosophen aus, um das Analyse-Panel vorzubereiten.")
-
 saved_consensus = st.session_state.get("consensus")
 if (
     isinstance(saved_consensus, dict)
